@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { LoginForm } from "./LoginForm";
 
 export default function LoginPage() {
@@ -18,9 +19,11 @@ export default function LoginPage() {
             <div className="botanical branch-right" aria-hidden="true"><i /><i /><i /><i /><i /></div>
             <div className="panel login-card">
               <span className="eyebrow">SECURE ACCESS</span>
-              <h2>รับจดหมายเข้าสู่ระบบ</h2>
-              <p>กรอกอีเมลที่ลงทะเบียน ระบบจะส่ง Magic Link เพื่อยืนยันตัวตนและตรวจสิทธิ์</p>
-              <LoginForm />
+              <h2>เข้าสู่ระบบประชุม</h2>
+              <p>ลูกบ้านใช้อีเมลเพื่อรับ Magic Link ส่วนผู้ดูแลใช้รหัส Admin ที่กำหนดไว้</p>
+              <Suspense fallback={<p className="muted">กำลังโหลดฟอร์มเข้าสู่ระบบ...</p>}>
+                <LoginForm />
+              </Suspense>
             </div>
           </div>
           <div className="login-assurance" aria-label="ระบบที่เชื่อมต่อ">

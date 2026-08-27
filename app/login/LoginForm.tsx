@@ -1,11 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 type FormState = "idle" | "sending" | "sent" | "error";
 
 export function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [lotNo, setLotNo] = useState("");
   const [state, setState] = useState<FormState>("idle");
@@ -19,8 +22,44 @@ export function LoginForm() {
     return () => window.clearInterval(timer);
   }, [cooldown]);
 
+  async function signInAdminDirectly() {
+    setState("sending");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), lot_no: lotNo.trim() }),
+      });
+      const payload = await response.json().catch(() => null) as { access_token?: string; refresh_token?: string; error?: string } | null;
+
+      if (!response.ok || !payload?.access_token || !payload.refresh_token) {
+        throw new Error(payload?.error ?? "เข้าสู่ระบบ Admin ไม่สำเร็จ");
+      }
+
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase.auth.setSession({
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token,
+      });
+
+      if (error) throw error;
+
+      window.localStorage.removeItem("village_pending_lot_no");
+      setState("sent");
+      setMessage("เข้าสู่ระบบ Admin สำเร็จ กำลังพาไปหน้าหลัก");
+      router.replace(searchParams.get("next") || "/dashboard");
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "เข้าสู่ระบบ Admin ไม่สำเร็จ");
+    }
+  }
+
   async function sendMagicLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const normalizedEmail = email.trim();
+    const normalizedLotNo = lotNo.trim();
 
     if (!configured) {
       setState("error");
@@ -28,15 +67,20 @@ export function LoginForm() {
       return;
     }
 
-    if (!email.trim()) {
+    if (!normalizedEmail) {
       setState("error");
-      setMessage("กรุณากรอกอีเมลที่ลงทะเบียน");
+      setMessage("กรุณากรอกอีเมลที่ลงทะเบียน หรือรหัส Admin");
       return;
     }
 
-    if (!lotNo.trim()) {
+    if (!normalizedLotNo) {
       setState("error");
       setMessage("กรุณากรอกเลขที่บ้าน/แปลงเพื่อใช้ตรวจสิทธิ์อัตโนมัติ");
+      return;
+    }
+
+    if (normalizedEmail === "VEMadmin" && normalizedLotNo === "0000") {
+      await signInAdminDirectly();
       return;
     }
 
@@ -45,13 +89,13 @@ export function LoginForm() {
 
     try {
       const supabase = createBrowserSupabaseClient();
-      const redirectTo = `${window.location.origin}/auth/callback?lot=${encodeURIComponent(lotNo.trim())}`;
+      const redirectTo = `${window.location.origin}/auth/callback?lot=${encodeURIComponent(normalizedLotNo)}`;
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
+        email: normalizedEmail,
         options: {
           emailRedirectTo: redirectTo,
           data: {
-            lot_no: lotNo.trim(),
+            lot_no: normalizedLotNo,
           },
         },
       });
@@ -60,7 +104,7 @@ export function LoginForm() {
         throw error;
       }
 
-      window.localStorage.setItem("village_pending_lot_no", lotNo.trim());
+      window.localStorage.setItem("village_pending_lot_no", normalizedLotNo);
       setState("sent");
       setCooldown(60);
       setMessage("ส่ง magic link ไปที่อีเมลแล้ว กรุณาเปิดอีเมลและกดลิงก์เพื่อเข้าสู่ระบบ");
@@ -78,13 +122,12 @@ export function LoginForm() {
   return (
     <form className="grid" onSubmit={sendMagicLink}>
       <label>
-        อีเมลที่ลงทะเบียน
+        อีเมลที่ลงทะเบียน / รหัส Admin
         <input
-          autoComplete="email"
-          inputMode="email"
+          autoComplete="username"
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="name@example.com"
-          type="email"
+          placeholder="name@example.com หรือ VEMadmin"
+          type="text"
           value={email}
         />
       </label>
@@ -99,7 +142,7 @@ export function LoginForm() {
         />
       </label>
       <button className="btn primary" disabled={state === "sending" || cooldown > 0} type="submit">
-        {state === "sending" ? "กำลังส่ง..." : cooldown > 0 ? `ส่งใหม่ได้ใน ${cooldown} วินาที` : "ส่ง Magic Link"}
+        {state === "sending" ? "กำลังเข้าสู่ระบบ..." : cooldown > 0 ? `ส่งใหม่ได้ใน ${cooldown} วินาที` : email.trim() === "VEMadmin" && lotNo.trim() === "0000" ? "เข้าสู่ระบบ Admin" : "ส่ง Magic Link"}
       </button>
       {message ? <p className={state === "error" ? "form-message error" : "form-message success"}>{message}</p> : null}
       {!configured ? (
