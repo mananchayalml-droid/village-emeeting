@@ -117,18 +117,28 @@ export function AppNavigation() {
   const { isAdmin } = useAuth();
   const pathname = usePathname();
   const items = [
-    { href: "/dashboard", label: "ภาพรวม" },
-    { href: "/meetings", label: "การประชุม" },
+    { href: "/dashboard", label: "หน้าหลัก" },
     { href: "/documents", label: "เอกสาร" },
     { href: "/voting", label: "ลงคะแนน" },
-    { href: "/incidents", label: "แจ้งเหตุ" },
-    { href: "/guide", label: "คู่มือ" },
+    { href: "/incidents", label: "แจ้งเหตุขัดข้อง" },
+    { href: "/guide", label: "คู่มือการใช้งาน" },
     ...(isAdmin ? [{ href: "/admin", label: "ผู้ดูแล" }] : []),
   ];
 
   return <nav aria-label="เมนูหลัก">{items.map((item) => {
     const active = pathname === item.href || (item.href === "/admin" && pathname.startsWith("/admin/"));
-    return <Link aria-current={active ? "page" : undefined} className={active ? "active" : undefined} key={item.href} href={item.href}>{item.label}</Link>;
+    return (
+      <Link
+        aria-current={active ? "page" : undefined}
+        aria-label={item.label}
+        className={active ? "active" : undefined}
+        key={item.href}
+        href={item.href}
+        title={item.label}
+      >
+        {item.label}
+      </Link>
+    );
   })}</nav>;
 }
 

@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { LoginForm } from "./LoginForm";
 
 export default function LoginPage() {
@@ -28,9 +27,6 @@ export default function LoginPage() {
             <span>Google Meet</span><i />
             <span>Google Drive</span><i />
             <span>Supabase</span>
-          </div>
-          <div className="mascot-garden">
-            <Image priority alt="มาสคอตกระรอกถือจดหมายเข้าสู่ระบบ" src="/squirrel-login-letter-transparent.png" width={550} height={700} sizes="(max-width: 600px) 72vw, 360px" />
           </div>
         </div>
       </section>

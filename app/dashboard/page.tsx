@@ -1,7 +1,8 @@
-import Image from "next/image";
 import { AppShell, PageHeader } from "@/components/AppShell";
 import { AdminOnly } from "@/components/AuthGate";
 import { DashboardLive } from "@/components/DashboardLive";
+import { MeetingClosureLive } from "@/components/MeetingClosureLive";
+import { MeetingsLive } from "@/components/MeetingsLive";
 
 export default function DashboardPage() {
   return (
@@ -10,25 +11,28 @@ export default function DashboardPage() {
         eyebrow="ประชุมหมู่บ้าน · โปร่งใส · ตรวจสอบได้"
         title="ศูนย์กลางการประชุมออนไลน์"
         description="ระบบกลางสำหรับแสดงตน เข้าถึงเอกสาร ลงคะแนน แจ้งเหตุ และจัดเก็บหลักฐานการประชุม ข้อมูลสำคัญจะอัปเดตระหว่างการประชุมโดยอัตโนมัติ"
-        action={<AdminOnly><a className="btn primary" href="/meetings">จัดการการประชุม</a></AdminOnly>}
+        action={<AdminOnly><a className="btn primary" href="#meetings">จัดการการประชุม</a></AdminOnly>}
         featured
         tone="community"
-        visual={<Image priority alt="ครอบครัวกระรอกตัวแทนชุมชนหมู่บ้าน" src="/squirrel-dashboard-family-transparent.png" fill sizes="(max-width: 800px) 70vw, 380px" />}
       />
       <DashboardLive />
+      <section id="meetings" className="combined-meeting-section" aria-label="จัดการการประชุม">
+        <MeetingClosureLive />
+        <MeetingsLive />
+      </section>
       <ComplianceFeatures />
     </AppShell>
   );
 }
 
 const complianceFeatures = [
-  { href: "/meetings", title: "ยืนยันตัวตนก่อนเข้าประชุม", description: "ตรวจสอบผู้มีสิทธิ์ บ้านเลขที่ และบันทึกเวลาเข้า–ออก" },
-  { href: "/meetings", title: "ประชุมด้วยเสียงและภาพ", description: "เชื่อมต่อ Google Meet เพื่อสื่อสารและมีปฏิสัมพันธ์ระหว่างประชุม" },
+  { href: "#meetings", title: "ยืนยันตัวตนก่อนเข้าประชุม", description: "ตรวจสอบผู้มีสิทธิ์ บ้านเลขที่ และบันทึกเวลาเข้า–ออก" },
+  { href: "#meetings", title: "ประชุมด้วยเสียงและภาพ", description: "เชื่อมต่อ Google Meet เพื่อสื่อสารและมีปฏิสัมพันธ์ระหว่างประชุม" },
   { href: "/documents", title: "เอกสารเข้าถึงได้ในที่เดียว", description: "เปิดเอกสารจาก Google Drive พร้อมบันทึกหลักฐานการเปิดอ่าน" },
   { href: "/voting", title: "ลงคะแนนเปิดเผยและลับ", description: "รองรับตัวเลือกที่กำหนดเอง น้ำหนักเสียง และสรุปผลเป็นกราฟ" },
-  { href: "/meetings", title: "ติดตามองค์ประชุมแบบเรียลไทม์", description: "แสดงจำนวนผู้ยืนยันตัวตน ผู้เข้าร่วม และสถานะองค์ประชุม" },
+  { href: "#meetings", title: "ติดตามองค์ประชุมแบบเรียลไทม์", description: "แสดงจำนวนผู้ยืนยันตัวตน ผู้เข้าร่วม และสถานะองค์ประชุม" },
   { href: "/incidents", title: "แจ้งและติดตามเหตุขัดข้อง", description: "แจ้งปัญหาเสียง ภาพ หรือเอกสาร พร้อมติดตามคำตอบจากผู้ดูแล" },
-  { href: "/meetings", title: "จัดเก็บหลักฐานตรวจสอบย้อนหลัง", description: "รวบรวมรายงาน ผลคะแนน ไฟล์บันทึก และข้อมูลจราจรอิเล็กทรอนิกส์" },
+  { href: "#meetings", title: "จัดเก็บหลักฐานตรวจสอบย้อนหลัง", description: "รวบรวมรายงาน ผลคะแนน ไฟล์บันทึก และข้อมูลจราจรอิเล็กทรอนิกส์" },
 ];
 
 function ComplianceFeatures() {

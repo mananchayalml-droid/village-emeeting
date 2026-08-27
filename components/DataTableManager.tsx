@@ -27,6 +27,36 @@ type TableDef = {
 
 type DataRow = Record<string, unknown> & { id?: string | number };
 
+type CsvRow = Record<string, string> & { _rowNumber: string };
+
+type CsvImportDef = {
+  headers: string[];
+  required: string[];
+  templateRows: string[][];
+  uniqueLabel: string;
+};
+
+const csvImportDefs: Record<string, CsvImportDef> = {
+  lots: {
+    headers: ["lot_no", "house_no", "owner_name", "owner_email", "owner_phone", "vote_weight", "can_vote", "notes"],
+    required: ["lot_no", "owner_name"],
+    templateRows: [
+      ["A-01", "554/1", "สมชาย ใจดี", "somchai@example.com", "0812345678", "1", "true", ""],
+      ["A-02", "554/2", "สมหญิง ใจดี", "somying@example.com", "0898765432", "1", "true", ""],
+    ],
+    uniqueLabel: "เลขที่แปลง (lot_no)",
+  },
+  meeting_eligible_voters: {
+    headers: ["meeting_code", "lot_no", "representative_name", "representative_email", "representative_phone", "is_proxy", "vote_weight", "can_vote"],
+    required: ["meeting_code", "lot_no"],
+    templateRows: [
+      ["AGM-2570-001", "A-01", "สมชาย ใจดี", "somchai@example.com", "0812345678", "false", "1", "true"],
+      ["AGM-2570-001", "A-02", "สมหญิง ใจดี", "somying@example.com", "0898765432", "false", "1", "true"],
+    ],
+    uniqueLabel: "รหัสประชุม + เลขที่แปลง",
+  },
+};
+
 const uuid = (name: string, label: string): FieldDef => ({ name, label, placeholder: "UUID", required: true });
 
 const tableDefs: TableDef[] = [
@@ -114,6 +144,88 @@ function displayValue(value: unknown) {
   return String(value);
 }
 
+function csvEscape(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function parseCsv(text: string) {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = "";
+  let quoted = false;
+  const source = text.replace(/^\uFEFF/, "");
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (quoted) {
+      if (character === '"' && next === '"') {
+        field += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        field += character;
+      }
+    } else if (character === '"' && field === "") {
+      quoted = true;
+    } else if (character === ",") {
+      record.push(field.trim());
+      field = "";
+    } else if (character === "\n" || character === "\r") {
+      if (character === "\r" && next === "\n") index += 1;
+      record.push(field.trim());
+      if (record.some((value) => value !== "")) records.push(record);
+      record = [];
+      field = "";
+    } else {
+      field += character;
+    }
+  }
+
+  if (quoted) throw new Error("พบเครื่องหมายคำพูดใน CSV ที่ปิดไม่ครบ");
+  record.push(field.trim());
+  if (record.some((value) => value !== "")) records.push(record);
+  return records;
+}
+
+function parseBoolean(value: string, fallback: boolean) {
+  const normalized = value.trim().toLocaleLowerCase("en-US");
+  if (!normalized) return fallback;
+  if (["true", "1", "yes", "y", "ใช่"].includes(normalized)) return true;
+  if (["false", "0", "no", "n", "ไม่", "ไม่ใช่"].includes(normalized)) return false;
+  return null;
+}
+
+function looksLikeEmail(value: string) {
+  return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function validateCsvRows(tableName: string, definition: CsvImportDef, rows: CsvRow[]) {
+  const errors: Record<string, string[]> = {};
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const rowErrors: string[] = [];
+    for (const required of definition.required) {
+      if (!row[required]?.trim()) rowErrors.push(`ไม่มี ${required}`);
+    }
+    const email = tableName === "lots" ? row.owner_email : row.representative_email;
+    if (!looksLikeEmail(email)) rowErrors.push("รูปแบบอีเมลไม่ถูกต้อง");
+    const weight = row.vote_weight?.trim();
+    if (weight && (!Number.isFinite(Number(weight)) || Number(weight) <= 0)) rowErrors.push("vote_weight ต้องมากกว่า 0");
+    for (const column of tableName === "lots" ? ["can_vote"] : ["is_proxy", "can_vote"]) {
+      if (parseBoolean(row[column] ?? "", column === "can_vote") === null) rowErrors.push(`${column} ต้องเป็น true หรือ false`);
+    }
+    const uniqueKey = tableName === "lots"
+      ? row.lot_no?.trim().toLocaleLowerCase("en-US")
+      : `${row.meeting_code?.trim().toLocaleLowerCase("en-US")}|${row.lot_no?.trim().toLocaleLowerCase("en-US")}`;
+    if (uniqueKey && seen.has(uniqueKey)) rowErrors.push(`ข้อมูล ${definition.uniqueLabel} ซ้ำในไฟล์`);
+    if (uniqueKey) seen.add(uniqueKey);
+    if (rowErrors.length) errors[row._rowNumber] = rowErrors;
+  }
+  return errors;
+}
+
 const commonColumnLabels: Record<string, string> = {
   id: "UUID",
   created_at: "สร้างเมื่อ",
@@ -178,7 +290,14 @@ export function DataTableManager() {
   const [signedIn, setSignedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [csvFileName, setCsvFileName] = useState("");
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [csvErrors, setCsvErrors] = useState<Record<string, string[]>>({});
+  const [importingCsv, setImportingCsv] = useState(false);
   const formPanelRef = useRef<HTMLElement>(null);
+  const csvPanelRef = useRef<HTMLElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const csvDefinition = csvImportDefs[activeTable.name];
 
   const displayColumns = useMemo(() => {
     const rowColumns = new Set(rows.flatMap((row) => Object.keys(row)));
@@ -235,6 +354,151 @@ export function DataTableManager() {
     setEditingRow(null);
     setMessage("");
     setSearchQuery("");
+    setCsvFileName("");
+    setCsvRows([]);
+    setCsvErrors({});
+    if (csvInputRef.current) csvInputRef.current.value = "";
+  }
+
+  function openCsvImport(tableName: "lots" | "meeting_eligible_voters") {
+    selectTable(tableName);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => csvPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    });
+  }
+
+  function downloadCsvTemplate() {
+    if (!csvDefinition) return;
+    const lines = [csvDefinition.headers, ...csvDefinition.templateRows]
+      .map((record) => record.map(csvEscape).join(","));
+    const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${activeTable.name}-template.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function selectCsvFile(file: File | undefined) {
+    setMessage("");
+    setError("");
+    setCsvRows([]);
+    setCsvErrors({});
+    setCsvFileName(file?.name ?? "");
+    if (!file || !csvDefinition) return;
+    if (!file.name.toLocaleLowerCase("en-US").endsWith(".csv")) {
+      setError("กรุณาเลือกไฟล์นามสกุล .csv");
+      return;
+    }
+    try {
+      const records = parseCsv(await file.text());
+      if (records.length < 2) throw new Error("CSV ต้องมีหัวตารางและข้อมูลอย่างน้อย 1 แถว");
+      const headers = records[0].map((header) => header.trim());
+      const duplicateHeaders = headers.filter((header, index) => headers.indexOf(header) !== index);
+      if (duplicateHeaders.length) throw new Error(`หัวตารางซ้ำ: ${Array.from(new Set(duplicateHeaders)).join(", ")}`);
+      const missingHeaders = csvDefinition.required.filter((required) => !headers.includes(required));
+      if (missingHeaders.length) throw new Error(`ขาดหัวตารางที่จำเป็น: ${missingHeaders.join(", ")}`);
+      const parsedRows = records.slice(1).map((record, index) => {
+        const row = Object.fromEntries(headers.map((header, columnIndex) => [header, record[columnIndex] ?? ""])) as CsvRow;
+        row._rowNumber = String(index + 2);
+        return row;
+      });
+      setCsvRows(parsedRows);
+      setCsvErrors(validateCsvRows(activeTable.name, csvDefinition, parsedRows));
+    } catch (fileError) {
+      setError(fileError instanceof Error ? fileError.message : "ไม่สามารถอ่านไฟล์ CSV ได้");
+    }
+  }
+
+  async function importCsv() {
+    if (!csvDefinition || csvRows.length === 0 || Object.keys(csvErrors).length > 0) return;
+    setImportingCsv(true);
+    setMessage("");
+    setError("");
+    try {
+      let importedIds: Array<string | number> = [];
+      if (activeTable.name === "lots") {
+        const payload = csvRows.map((row) => ({
+          lot_no: row.lot_no.trim(),
+          house_no: row.house_no?.trim() || null,
+          owner_name: row.owner_name.trim(),
+          owner_email: row.owner_email?.trim().toLocaleLowerCase("en-US") || null,
+          owner_phone: row.owner_phone?.trim() || null,
+          vote_weight: row.vote_weight?.trim() ? Number(row.vote_weight) : 1,
+          can_vote: parseBoolean(row.can_vote ?? "", true),
+          notes: row.notes?.trim() || null,
+        }));
+        const { data, error: importError } = await supabase
+          .from("lots")
+          .upsert(payload, { onConflict: "lot_no" })
+          .select("id");
+        if (importError) throw importError;
+        importedIds = (data ?? []).map((row) => row.id);
+      } else {
+        const meetingCodes = Array.from(new Set(csvRows.map((row) => row.meeting_code.trim())));
+        const lotNumbers = Array.from(new Set(csvRows.map((row) => row.lot_no.trim())));
+        const [{ data: meetings, error: meetingError }, { data: lots, error: lotError }] = await Promise.all([
+          supabase.from("meetings").select("id,code,status").in("code", meetingCodes),
+          supabase.from("lots").select("id,lot_no,owner_name,owner_email,owner_phone,vote_weight,can_vote").in("lot_no", lotNumbers),
+        ]);
+        if (meetingError) throw meetingError;
+        if (lotError) throw lotError;
+        const meetingMap = new Map((meetings ?? []).map((meeting) => [meeting.code, meeting]));
+        const lotMap = new Map((lots ?? []).map((lot) => [lot.lot_no, lot]));
+        const referenceErrors: Record<string, string[]> = {};
+        for (const row of csvRows) {
+          const rowErrors: string[] = [];
+          const meeting = meetingMap.get(row.meeting_code.trim());
+          if (!meeting) rowErrors.push(`ไม่พบการประชุม ${row.meeting_code}`);
+          else if (meeting.status === "closed" || meeting.status === "archived") rowErrors.push("การประชุมปิดและล็อกแล้ว");
+          if (!lotMap.has(row.lot_no.trim())) rowErrors.push(`ไม่พบแปลง ${row.lot_no}`);
+          if (rowErrors.length) referenceErrors[row._rowNumber] = rowErrors;
+        }
+        if (Object.keys(referenceErrors).length) {
+          setCsvErrors(referenceErrors);
+          throw new Error("พบข้อมูลอ้างอิงที่ไม่ถูกต้อง กรุณาตรวจแถวที่แจ้งเตือน");
+        }
+        const payload = csvRows.map((row) => {
+          const meeting = meetingMap.get(row.meeting_code.trim())!;
+          const lot = lotMap.get(row.lot_no.trim())!;
+          return {
+            meeting_id: meeting.id,
+            lot_id: lot.id,
+            representative_name: row.representative_name?.trim() || lot.owner_name,
+            representative_email: row.representative_email?.trim().toLocaleLowerCase("en-US") || lot.owner_email,
+            representative_phone: row.representative_phone?.trim() || lot.owner_phone,
+            is_proxy: parseBoolean(row.is_proxy ?? "", false),
+            vote_weight: row.vote_weight?.trim() ? Number(row.vote_weight) : lot.vote_weight,
+            can_vote: parseBoolean(row.can_vote ?? "", lot.can_vote),
+            identity_status: "pending",
+          };
+        });
+        const { data, error: importError } = await supabase
+          .from("meeting_eligible_voters")
+          .upsert(payload, { onConflict: "meeting_id,lot_id" })
+          .select("id");
+        if (importError) throw importError;
+        importedIds = (data ?? []).map((row) => row.id);
+      }
+
+      await supabase.from("admin_audit_logs").insert({
+        action: "import_csv",
+        target_table: activeTable.name,
+        target_id: importedIds.length === 1 ? importedIds[0] : null,
+        after_data: { file_name: csvFileName, row_count: csvRows.length, imported_ids: importedIds },
+      });
+      setMessage(`นำเข้า ${csvRows.length} แถวจาก ${csvFileName} สำเร็จ`);
+      setCsvRows([]);
+      setCsvErrors({});
+      setCsvFileName("");
+      if (csvInputRef.current) csvInputRef.current.value = "";
+      await loadRows(activeTable);
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "นำเข้า CSV ไม่สำเร็จ");
+    } finally {
+      setImportingCsv(false);
+    }
   }
 
   function startEdit(row: DataRow) {
@@ -310,6 +574,13 @@ export function DataTableManager() {
             <StatusBadge tone={activeTable.allowInsert ? "green" : "amber"}>{activeTable.allowInsert ? "เพิ่มและแก้ไขได้" : "อ่านอย่างเดียว"}</StatusBadge>
           </div>
         </div>
+        {signedIn && isAdmin ? (
+          <div className="data-import-shortcuts">
+            <strong>เพิ่มข้อมูลหลายรายการ</strong>
+            <button className="btn primary" type="button" onClick={() => openCsvImport("lots")}>นำเข้าลูกบ้าน CSV</button>
+            <button className="btn" type="button" onClick={() => openCsvImport("meeting_eligible_voters")}>นำเข้าผู้มีสิทธิ์ CSV</button>
+          </div>
+        ) : null}
       </section>
 
       <div className="data-manager-content">
@@ -350,6 +621,59 @@ export function DataTableManager() {
                 {editingRow ? <button className="btn" onClick={cancelEdit} type="button">ยกเลิก</button> : null}
               </div>
             </form>
+          </section>
+        ) : null}
+
+        {signedIn && isAdmin && csvDefinition ? (
+          <section className="panel csv-import-panel" ref={csvPanelRef}>
+            <div className="section-title">
+              <div>
+                <span className="eyebrow">Bulk import</span>
+                <h2>นำเข้าข้อมูลจาก CSV</h2>
+                <p className="muted">เพิ่มข้อมูลใหม่หรืออัปเดตข้อมูลเดิมด้วย {csvDefinition.uniqueLabel}</p>
+              </div>
+              <StatusBadge tone="blue">CSV UTF-8</StatusBadge>
+            </div>
+            <div className="csv-import-toolbar">
+              <button className="btn" type="button" onClick={downloadCsvTemplate}>ดาวน์โหลดไฟล์ตัวอย่าง</button>
+              <label className="csv-file-control">
+                <span>เลือกไฟล์ CSV</span>
+                <input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0])} />
+              </label>
+              {csvFileName ? <span className="csv-file-name">{csvFileName}</span> : null}
+            </div>
+            <p className="csv-import-note">ระบบจะตรวจสอบทุกแถวก่อนบันทึก และจะไม่แก้ไข Attendance, คะแนนโหวต, Traffic Log หรือหลักฐานของระบบ</p>
+
+            {csvRows.length > 0 ? (
+              <>
+                <div className="csv-import-summary">
+                  <strong>{csvRows.length} แถว</strong>
+                  <span className={Object.keys(csvErrors).length ? "csv-invalid" : "csv-valid"}>
+                    {Object.keys(csvErrors).length ? `พบปัญหา ${Object.keys(csvErrors).length} แถว` : "ข้อมูลพร้อมนำเข้า"}
+                  </span>
+                  <button className="btn primary" disabled={importingCsv || Object.keys(csvErrors).length > 0} type="button" onClick={importCsv}>
+                    {importingCsv ? "กำลังนำเข้า..." : `ยืนยันนำเข้า ${csvRows.length} แถว`}
+                  </button>
+                </div>
+                <div className="table-wrap csv-preview-wrap">
+                  <table className="admin-data-table csv-preview-table">
+                    <thead>
+                      <tr><th>แถว</th>{csvDefinition.headers.map((header) => <th key={header}>{header}</th>)}<th>ผลตรวจ</th></tr>
+                    </thead>
+                    <tbody>
+                      {csvRows.slice(0, 20).map((row) => (
+                        <tr key={row._rowNumber} className={csvErrors[row._rowNumber] ? "csv-row-error" : undefined}>
+                          <td>{row._rowNumber}</td>
+                          {csvDefinition.headers.map((header) => <td key={header}>{row[header] || "-"}</td>)}
+                          <td>{csvErrors[row._rowNumber]?.join(" · ") ?? "ผ่าน"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {csvRows.length > 20 ? <p className="muted csv-preview-limit">แสดงตัวอย่าง 20 จาก {csvRows.length} แถว</p> : null}
+              </>
+            ) : null}
           </section>
         ) : null}
 

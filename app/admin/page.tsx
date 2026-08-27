@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import { AppShell, PageHeader, StatusBadge } from "@/components/AppShell";
 import { QuickTestSetup } from "@/components/QuickTestSetup";
@@ -13,7 +12,6 @@ export default function AdminPage() {
         description="จัดการผู้มีสิทธิ ผู้ดูแลระบบ เอกสาร โหวต หลักฐาน และ audit log โดย admin ทั้ง 5 คนต้องเปิด 2FA"
         action={<Link className="btn primary" href="/admin/data">จัดการข้อมูลตาราง</Link>}
         tone="admin"
-        visual={<Image priority alt="กระรอกผู้ดูแลกำลังทำงานหน้าแล็ปท็อป" src="/squirrel-admin-laptop-transparent.png" fill sizes="(max-width: 800px) 68vw, 310px" />}
       />
 
       <QuickTestSetup />

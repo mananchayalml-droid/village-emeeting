@@ -137,7 +137,7 @@ export function QuickTestSetup() {
           {saving ? "กำลังตั้งค่า..." : "สร้างชุดข้อมูลทดสอบ"}
         </button>
         {result ? <Link className="btn" href="/dashboard">ตรวจ Dashboard</Link> : null}
-        {result ? <Link className="btn" href="/meetings">ตรวจหน้าการประชุม</Link> : null}
+        {result ? <Link className="btn" href="/dashboard#meetings">ตรวจส่วนการประชุม</Link> : null}
       </div>
       {error ? <p className="form-message error">{error}</p> : null}
       {result ? <p className="form-message success">ตั้งค่าสำเร็จ: {result.meetingCode} · แปลงทดสอบ {result.lotNo}</p> : null}
